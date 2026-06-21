@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Limpador de Texto PDF</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: Segoe UI, Arial, sans-serif; font-size: 14px; background: #f5f5f5; color: #222; padding: 20px; }
+  h1 { font-size: 17px; font-weight: 600; margin-bottom: 16px; color: #333; }
+  .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 12px; }
+  label.lbl { font-size: 12px; color: #666; display: block; margin-bottom: 5px; }
+  textarea { width: 100%; height: 380px; font-size: 13px; font-family: Segoe UI, Arial, sans-serif; line-height: 1.65; padding: 10px; border: 1px solid #ccc; border-radius: 6px; resize: vertical; background: #fff; }
+  textarea[readonly] { background: #fafafa; }
+  .controls { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 8px; }
+  .controls-row2 { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; padding: 8px 10px; background: #eef3fb; border-radius: 6px; border: 1px solid #c5d9f0; }
+  select { font-size: 13px; padding: 5px 8px; border: 1px solid #ccc; border-radius: 5px; background: #fff; }
+  .chk-label { font-size: 13px; color: #555; display: flex; align-items: center; gap: 5px; cursor: pointer; }
+  .chk-label.filtro { color: #1a5ca8; font-weight: 500; }
+  button { font-size: 13px; padding: 6px 16px; border: 1px solid #aaa; border-radius: 5px; background: #fff; cursor: pointer; }
+  button:hover { background: #eee; }
+  button.primary { background: #1a5ca8; color: #fff; border-color: #1a5ca8; font-weight: 600; }
+  button.primary:hover { background: #154d8f; }
+  button:disabled { opacity: 0.4; cursor: default; }
+  #stats { font-size: 12px; color: #888; min-height: 18px; margin-bottom: 4px; }
+  #filtradas { font-size: 12px; color: #c0392b; min-height: 18px; margin-bottom: 8px; }
+  .note { font-size: 12px; color: #888; margin-top: 16px; border-top: 1px solid #ddd; padding-top: 10px; }
+  .sec-title { font-size: 11px; font-weight: 600; color: #1a5ca8; text-transform: uppercase; letter-spacing: 0.5px; margin-right: 4px; }
+</style>
+</head>
+<body>
+
+<h1>Limpador de Texto PDF</h1>
+
+<div class="grid">
+  <div>
+    <label class="lbl">Cole aqui o texto quebrado (copiado do PDF)</label>
+    <textarea id="input" placeholder="Cole o texto aqui..."></textarea>
+  </div>
+  <div>
+    <label class="lbl">Texto limpo</label>
+    <textarea id="output" readonly placeholder="O resultado aparece aqui..."></textarea>
+  </div>
+</div>
+
+<div class="controls">
+  <div style="display:flex;align-items:center;gap:6px;">
+    <label class="lbl" style="margin:0;">Modo:</label>
+    <select id="mode">
+      <option value="smart">Inteligente (recomendado)</option>
+      <option value="simple">Simples (une todas as linhas)</option>
+    </select>
+  </div>
+  <label class="chk-label">
+    <input type="checkbox" id="indent" checked>
+    Manter recuo de parágrafo (Tab)
+  </label>
+  <button class="primary" id="btnClean">Limpar texto</button>
+  <button id="btnCopy" disabled>Copiar resultado</button>
+  <button id="btnClear">Limpar tudo</button>
+</div>
+
+<div class="controls-row2">
+  <span class="sec-title">Filtros de ruído</span>
+  <label class="chk-label filtro">
+    <input type="checkbox" id="fFls" checked>
+    Cabeçalho (fls. N)
+  </label>
+  <label class="chk-label filtro">
+    <input type="checkbox" id="fLateral" checked>
+    Lateral direita (autenticação digital)
+  </label>
+  <label class="chk-label filtro">
+    <input type="checkbox" id="fRodape" checked>
+    Rodapé (promotoria / vara / endereço)
+  </label>
+  <label class="chk-label filtro">
+    <input type="checkbox" id="fCabDoc" checked>
+    Cabeçalho de documento (MPCE / TJCE)
+  </label>
+</div>
+
+<div id="stats"></div>
+<div id="filtradas"></div>
+
+<div class="note">
+  <strong>Sobre o algoritmo:</strong> O texto não é alterado, suprimido nem acrescido em conteúdo.
+  As únicas transformações são: (1) remoção de quebras de linha tipográficas substituídas por espaço;
+  (2) inserção de linha em branco entre parágrafos; (3) Tab opcional no início de cada parágrafo;
+  (4) remoção de hífens de final de linha quando são artefatos de quebra tipográfica do PDF;
+  (5) remoção das linhas de ruído marcadas nos filtros acima.
+</div>
+
+<script>
+
+const FILTROS = {
+  fFls: [
+    /^fls\.\s*\d+\s*$/i,
+    /^p[aá]g(?:ina)?\s*\.?\s*\d+\s*$/i,
+  ],
+  fLateral: [
+    /Para conferir o original/i,
+    /acesse o site https?:\/\//i,
+    /pastadigital/i,
+    /abrirConferenciaDocumento/i,
+    /Este documento é cópia do original/i,
+    /assinado digitalmente por/i,
+    /protocolado em \d{2}\/\d{2}\/\d{4}/i,
+    /sob o número [A-Z0-9]{5,}/i,
+    /informe o processo \d/i,
+    /e código [A-Za-z0-9]{5,}/i,
+    /tjce\.jus\.br/i,
+    /esaj\.tjce/i,
+    /\.jus\.br/i,
+  ],
+  fRodape: [
+    /\dª?\s*Promotoria de Justiça/i,
+    /Promotoria de Justiça de/i,
+    /Vara (Criminal|Cível|da Comarca|de [A-Z])/i,
+    /Vara [0-9ª]+/i,
+    /Telefone:\s*\d/i,
+    /Tel\.?\s*\(?\d{2}\)?\s*\d/i,
+    /R\.\s+[A-Z][a-z]+ (Cordeiro|de Oliveira|da)/,
+    /Centro\s*[-–]\s*[A-Z][a-z]+\/[A-Z]{2}/i,
+    /CEP\s+\d{5}-?\d{3}/i,
+    /Av\. (Cel|Col|Dr|Sen|Pres|Gen)\./i,
+    /\d{5}-\d{3},?\s*(Centro|Bairro)/i,
+  ],
+  fCabDoc: [
+    /^MPCE\s*$/,
+    /Ministério Público do Estado do Ceará/i,
+    /MINISTÉRIO PÚBLICO DO ESTADO DO CEARÁ/,
+    /^PODER JUDICIÁRIO DO ESTADO/i,
+    /Poder Judiciário do Estado do Ceará/i,
+    /^Comarca de [A-Z]/i,
+    /^\d+ª Vara da Comarca/i,
+    /^\d+ª? Vara (Criminal|Cível|de)/i,
+    /Av\. Cel\. Virg[ií]lio/i,
+  ],
+};
+
+function deveRemover(line, opcoes) {
+  const t = line.trim();
+  if (!t) return false;
+  for (const [chave, ativo] of Object.entries(opcoes)) {
+    if (!ativo) continue;
+    for (const re of FILTROS[chave]) {
+      if (re.test(t)) return true;
+    }
+  }
+  return false;
+}
+
+function filterNoise(lines, opcoes) {
+  const removidas = [];
+  const restantes = lines.filter(line => {
+    if (deveRemover(line, opcoes)) {
+      removidas.push(line.trim());
+      return false;
+    }
+    return true;
+  });
+  return { restantes, removidas };
+}
+
+function cleanText(raw, mode, keepIndent, opcoes) {
+  const allLines = raw.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n');
+  const { restantes: lines, removidas } = filterNoise(allLines, opcoes);
+
+  if (mode === 'simple') {
+    const paragraphs = [];
+    let current = [];
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (trimmed === '') {
+        if (current.length > 0) { paragraphs.push(current.join(' ')); current = []; }
+      } else {
+        current.push(trimmed);
+      }
+    }
+    if (current.length > 0) paragraphs.push(current.join(' '));
+    return {
+      text: paragraphs.map(p => (keepIndent ? '\t' + p.trim() : p.trim())).join('\n\n'),
+      removidas
+    };
+  }
+
+  function isParaBreak(prevLine, nextLine) {
+    if (!prevLine || !nextLine) return true;
+    const prev = prevLine.trim();
+    const next = nextLine.trim();
+    if (!prev || !next) return true;
+    const endsWithPeriod = /[.!?:;]\s*$/.test(prev);
+    const isShortLine = prev.length < 55;
+    const nextIsIndented = /^\s{3,}/.test(nextLine) || nextLine.startsWith('\t');
+    const looksLikeHeader = /^[A-ZÁÉÍÓÚÀÂÊÔÃÕÜÇÑ\s0-9.]{3,60}$/.test(prev) && prev === prev.toUpperCase();
+    const startsWithNumber = /^\d+[.)]\s/.test(next);
+    const prevEndsHyphen = prev.endsWith('-');
+    if (prevEndsHyphen) return false;
+    if (looksLikeHeader) return true;
+    if (nextIsIndented) return true;
+    if (startsWithNumber) return true;
+    if (endsWithPeriod && (isShortLine || /^[A-ZÁÉÍÓÚÀÂÊÔÃÕÜÇ"«]/.test(next))) return true;
+    return false;
+  }
+
+  const paragraphs = [];
+  let current = [];
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const trimmed = line.trim();
+    if (trimmed === '') {
+      if (current.length > 0) { paragraphs.push(current); current = []; }
+      continue;
+    }
+    if (current.length === 0) { current.push(trimmed); continue; }
+    const prevLine = lines[i - 1] || '';
+    const shouldBreak = isParaBreak(prevLine, line);
+    if (shouldBreak && current.length > 0) {
+      paragraphs.push(current);
+      current = [trimmed];
+    } else {
+      const last = current[current.length - 1];
+      if (last && last.endsWith('-')) {
+        current[current.length - 1] = last.slice(0, -1) + trimmed;
+      } else {
+        current.push(trimmed);
+      }
+    }
+  }
+  if (current.length > 0) paragraphs.push(current);
+
+  return {
+    text: paragraphs.map(p => {
+      const joined = p.join(' ').replace(/\s+/g, ' ').trim();
+      return keepIndent ? '\t' + joined : joined;
+    }).join('\n\n'),
+    removidas
+  };
+}
+
+const inputEl   = document.getElementById('input');
+const outputEl  = document.getElementById('output');
+const btnClean  = document.getElementById('btnClean');
+const btnCopy   = document.getElementById('btnCopy');
+const btnClear  = document.getElementById('btnClear');
+const statsEl   = document.getElementById('stats');
+const filtradasEl = document.getElementById('filtradas');
+const modeEl    = document.getElementById('mode');
+const indentEl  = document.getElementById('indent');
+
+function getOpcoes() {
+  return {
+    fFls:    document.getElementById('fFls').checked,
+    fLateral: document.getElementById('fLateral').checked,
+    fRodape: document.getElementById('fRodape').checked,
+    fCabDoc: document.getElementById('fCabDoc').checked,
+  };
+}
+
+function processar() {
+  const raw = inputEl.value;
+  if (!raw.trim()) { statsEl.textContent = 'Cole algum texto para limpar.'; return; }
+  const { text, removidas } = cleanText(raw, modeEl.value, indentEl.checked, getOpcoes());
+  outputEl.value = text;
+  btnCopy.disabled = false;
+  const inLines = raw.split('\n').length;
+  const outParas = text.split('\n\n').length;
+  statsEl.textContent = inLines + ' linhas → ' + outParas + ' parágrafo(s) | ' + text.length + ' caracteres';
+  if (removidas.length > 0) {
+    filtradasEl.textContent = '⚠ ' + removidas.length + ' linha(s) de ruído removida(s): ' +
+      removidas.slice(0, 3).map(r => '"' + r.substring(0, 50) + (r.length > 50 ? '…' : '') + '"').join(' | ') +
+      (removidas.length > 3 ? ' (e mais ' + (removidas.length - 3) + ')' : '');
+  } else {
+    filtradasEl.textContent = '';
+  }
+}
+
+btnClean.addEventListener('click', processar);
+
+inputEl.addEventListener('paste', () => {
+  setTimeout(() => { if (inputEl.value.trim()) processar(); }, 50);
+});
+
+btnCopy.addEventListener('click', () => {
+  if (!outputEl.value) return;
+  outputEl.select();
+  document.execCommand('copy');
+  const orig = btnCopy.textContent;
+  btnCopy.textContent = 'Copiado!';
+  setTimeout(() => { btnCopy.textContent = orig; }, 1500);
+});
+
+btnClear.addEventListener('click', () => {
+  inputEl.value = '';
+  outputEl.value = '';
+  btnCopy.disabled = true;
+  statsEl.textContent = '';
+  filtradasEl.textContent = '';
+});
+
+modeEl.addEventListener('change', () => { if (inputEl.value.trim()) processar(); });
+indentEl.addEventListener('change', () => { if (inputEl.value.trim()) processar(); });
+['fFls','fLateral','fRodape','fCabDoc'].forEach(id => {
+  document.getElementById(id).addEventListener('change', () => { if (inputEl.value.trim()) processar(); });
+});
+</script>
+</body>
+</html>
