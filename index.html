@@ -7,11 +7,15 @@
 <style>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body { font-family: Segoe UI, Arial, sans-serif; font-size: 14px; background: #f5f5f5; color: #222; padding: 20px; }
-  h1 { font-size: 17px; font-weight: 600; margin-bottom: 16px; color: #333; }
+  h1 { font-size: 17px; font-weight: 600; margin-bottom: 16px; color: #333; display: flex; align-items: center; gap: 10px; }
+  .badge { font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 10px; background: #e3e3e3; color: #555; }
+  .badge.pje { background: #d9f0e0; color: #1d6b3a; }
+  .badge.esaj { background: #fbe9cf; color: #8a5a10; }
   .grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-bottom: 12px; }
   label.lbl { font-size: 12px; color: #666; display: block; margin-bottom: 5px; }
   textarea { width: 100%; height: 380px; font-size: 13px; font-family: Segoe UI, Arial, sans-serif; line-height: 1.65; padding: 10px; border: 1px solid #ccc; border-radius: 6px; resize: vertical; background: #fff; }
   textarea[readonly] { background: #fafafa; }
+  #output { text-align: justify; }
   .controls { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 8px; }
   .controls-row2 { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; padding: 8px 10px; background: #eef3fb; border-radius: 6px; border: 1px solid #c5d9f0; }
   select { font-size: 13px; padding: 5px 8px; border: 1px solid #ccc; border-radius: 5px; background: #fff; }
@@ -23,14 +27,17 @@
   button.primary:hover { background: #154d8f; }
   button:disabled { opacity: 0.4; cursor: default; }
   #stats { font-size: 12px; color: #888; min-height: 18px; margin-bottom: 4px; }
-  #filtradas { font-size: 12px; color: #c0392b; min-height: 18px; margin-bottom: 8px; }
+  #filtradas { margin-bottom: 8px; font-size: 12px; }
+  #filtradas summary { color: #c0392b; cursor: pointer; }
+  #listaRemovidas { margin-top: 6px; padding: 8px 10px 8px 26px; background: #fff; border: 1px solid #e3c6c2; border-radius: 6px; color: #444; max-height: 220px; overflow: auto; }
+  #listaRemovidas li { margin-bottom: 3px; word-break: break-word; }
   .note { font-size: 12px; color: #888; margin-top: 16px; border-top: 1px solid #ddd; padding-top: 10px; }
   .sec-title { font-size: 11px; font-weight: 600; color: #1a5ca8; text-transform: uppercase; letter-spacing: 0.5px; margin-right: 4px; }
 </style>
 </head>
 <body>
 
-<h1>Limpador de Texto PDF</h1>
+<h1>Limpador de Texto PDF <span id="origem" class="badge">origem: —</span></h1>
 
 <div class="grid">
   <div>
@@ -68,7 +75,11 @@
   </label>
   <label class="chk-label filtro">
     <input type="checkbox" id="fLateral" checked>
-    Lateral direita (autenticação digital)
+    e-SAJ: lateral (autenticação digital)
+  </label>
+  <label class="chk-label filtro">
+    <input type="checkbox" id="fPje" checked>
+    PJe: carimbo (Num./Pág., assinatura, QR)
   </label>
   <label class="chk-label filtro">
     <input type="checkbox" id="fRodape" checked>
@@ -88,11 +99,13 @@
   As únicas transformações são: (1) remoção de quebras de linha tipográficas substituídas por espaço;
   (2) inserção de linha em branco entre parágrafos; (3) Tab opcional no início de cada parágrafo;
   (4) remoção de hífens de final de linha quando são artefatos de quebra tipográfica do PDF;
-  (5) remoção das linhas de ruído marcadas nos filtros acima.
+  (5) remoção das linhas (ou trechos de carimbo dentro de uma linha) de ruído marcados nos filtros acima.
+  Toda remoção fica listada no aviso vermelho abaixo.
 </div>
 
 <script>
 
+// Filtros que removem a LINHA inteira quando alguma regex casa.
 const FILTROS = {
   fFls: [
     /^fls\.\s*\d+\s*$/i,
@@ -113,6 +126,15 @@ const FILTROS = {
     /esaj\.tjce/i,
     /\.jus\.br/i,
   ],
+  fPje: [
+    /^Num\.\s*\d+\s*-\s*P[aá]g\.\s*\d+\s*$/i,
+    /^Assinado eletronicamente por:/i,
+    /^N[uú]mero do documento:\s*\d+/i,
+    /^Este documento foi gerado pelo usu[aá]rio/i,
+    /listView\.seam/i,
+    /ConsultaDocumento/i,
+    /^https?:\/\/pje\S*\s*$/i,
+  ],
   fRodape: [
     /\dª?\s*Promotoria de Justiça/i,
     /Promotoria de Justiça de/i,
@@ -122,28 +144,57 @@ const FILTROS = {
     /Tel\.?\s*\(?\d{2}\)?\s*\d/i,
     /R\.\s+[A-Z][a-z]+ (Cordeiro|de Oliveira|da)/,
     /Centro\s*[-–]\s*[A-Z][a-z]+\/[A-Z]{2}/i,
-    /CEP\s+\d{5}-?\d{3}/i,
+    /CEP\s*\d{2}\.?\d{3}-?\d{3}/i,
     /Av\. (Cel|Col|Dr|Sen|Pres|Gen)\./i,
     /\d{5}-\d{3},?\s*(Centro|Bairro)/i,
+    /@mpce\.mp\.br/i,
+    /^\(?\d{2}\)?\s*[-–]?\s*\d{4,5}-\d{4}\s*$/,
+    /^\d{2}\.\d{4}\.\d{8}-\d\s*$/,
   ],
   fCabDoc: [
     /^MPCE\s*$/,
-    /Ministério Público do Estado do Ceará/i,
-    /MINISTÉRIO PÚBLICO DO ESTADO DO CEARÁ/,
+    /^(O\s+)?Ministério Público do Estado do Ceará\s*$/i,
     /^PODER JUDICIÁRIO DO ESTADO/i,
-    /Poder Judiciário do Estado do Ceará/i,
-    /^Comarca de [A-Z]/i,
+    /^Poder Judiciário do Estado do Ceará\s*$/i,
+    /^Comarca de [A-Z][a-zà-ú ]+\s*$/,
     /^\d+ª Vara da Comarca/i,
     /^\d+ª? Vara (Criminal|Cível|de)/i,
     /Av\. Cel\. Virg[ií]lio/i,
   ],
 };
 
+// Filtros amplos de cabeçalho/rodapé só valem para linhas curtas: evita apagar
+// uma frase da peça que apenas cita "Vara", "Promotoria" ou endereço.
+const GRUPOS_LINHA_CURTA = { fRodape: 170, fCabDoc: 170 };
+
+// Carimbos do PJe que podem vir colados no meio de uma linha de texto.
+// Trecho removido, o resto da linha é preservado.
+const INLINE = {
+  fPje: [
+    /Num\.\s*\d+\s*-\s*P[aá]g\.\s*\d+/gi,
+    /Assinado eletronicamente por:.*?\d{2}\/\d{2}\/\d{4}\s+\d{2}:\d{2}:\d{2}/gi,
+    /N[uú]mero do documento:\s*\d+/gi,
+    /Este documento foi gerado pelo usu[aá]rio\s+\S+\s+em\s+\d{2}\/\d{2}\/\d{4}\s+\d{2}:\d{2}:\d{2}/gi,
+  ],
+  fRodape: [
+    /(?:Rua|R\.|Av\.|Avenida)[^.]{0,90}?CEP\s*\d{2}\.?\d{3}-?\d{3}[^\n]{0,60}?\d{4,5}-\d{4}/gi,
+    /\b\d{2}\.\d{4}\.\d{8}-\d\b/g,
+  ],
+};
+
+function detectarOrigem(raw) {
+  if (/Num\.\s*\d+\s*-\s*P[aá]g\.|Assinado eletronicamente por|Este documento foi gerado pelo usu[aá]rio/i.test(raw)) return 'pje';
+  if (/pastadigital|Para conferir o original|assinado digitalmente por|abrirConferenciaDocumento/i.test(raw)) return 'esaj';
+  return null;
+}
+
 function deveRemover(line, opcoes) {
   const t = line.trim();
   if (!t) return false;
   for (const [chave, ativo] of Object.entries(opcoes)) {
-    if (!ativo) continue;
+    if (!ativo || !FILTROS[chave]) continue;
+    const max = GRUPOS_LINHA_CURTA[chave];
+    if (max && t.length > max) continue;
     for (const re of FILTROS[chave]) {
       if (re.test(t)) return true;
     }
@@ -151,15 +202,27 @@ function deveRemover(line, opcoes) {
   return false;
 }
 
+function removerInline(line, opcoes, removidas) {
+  let out = line;
+  for (const [chave, regs] of Object.entries(INLINE)) {
+    if (!opcoes[chave]) continue;
+    for (const re of regs) {
+      out = out.replace(re, m => { removidas.push(m.trim()); return ' '; });
+    }
+  }
+  return out === line ? line : out.replace(/[ \t]+/g, ' ');
+}
+
 function filterNoise(lines, opcoes) {
   const removidas = [];
-  const restantes = lines.filter(line => {
-    if (deveRemover(line, opcoes)) {
-      removidas.push(line.trim());
-      return false;
-    }
-    return true;
-  });
+  const restantes = [];
+  for (const original of lines) {
+    if (deveRemover(original, opcoes)) { removidas.push(original.trim()); continue; }
+    const line = removerInline(original, opcoes, removidas);
+    if (line !== original && !line.trim()) continue; // sobrou só carimbo
+    if (line !== original && deveRemover(line, opcoes)) { removidas.push(line.trim()); continue; }
+    restantes.push(line);
+  }
   return { restantes, removidas };
 }
 
@@ -249,32 +312,50 @@ const statsEl   = document.getElementById('stats');
 const filtradasEl = document.getElementById('filtradas');
 const modeEl    = document.getElementById('mode');
 const indentEl  = document.getElementById('indent');
+const origemEl  = document.getElementById('origem');
+const IDS_FILTROS = ['fFls', 'fLateral', 'fPje', 'fRodape', 'fCabDoc'];
 
 function getOpcoes() {
-  return {
-    fFls:    document.getElementById('fFls').checked,
-    fLateral: document.getElementById('fLateral').checked,
-    fRodape: document.getElementById('fRodape').checked,
-    fCabDoc: document.getElementById('fCabDoc').checked,
-  };
+  const o = {};
+  IDS_FILTROS.forEach(id => { o[id] = document.getElementById(id).checked; });
+  return o;
+}
+
+function mostrarOrigem(raw) {
+  const o = detectarOrigem(raw);
+  origemEl.className = 'badge' + (o ? ' ' + o : '');
+  origemEl.textContent = 'origem: ' + (o === 'pje' ? 'PJe' : o === 'esaj' ? 'e-SAJ' : '—');
+}
+
+function mostrarRemovidas(removidas) {
+  filtradasEl.textContent = '';
+  if (!removidas.length) return;
+  const det = document.createElement('details');
+  const sum = document.createElement('summary');
+  sum.textContent = '⚠ ' + removidas.length + ' trecho(s) de ruído removido(s) — clique para conferir';
+  const ul = document.createElement('ol');
+  ul.id = 'listaRemovidas';
+  removidas.forEach(r => {
+    const li = document.createElement('li');
+    li.textContent = r;
+    ul.appendChild(li);
+  });
+  det.appendChild(sum);
+  det.appendChild(ul);
+  filtradasEl.appendChild(det);
 }
 
 function processar() {
   const raw = inputEl.value;
   if (!raw.trim()) { statsEl.textContent = 'Cole algum texto para limpar.'; return; }
+  mostrarOrigem(raw);
   const { text, removidas } = cleanText(raw, modeEl.value, indentEl.checked, getOpcoes());
   outputEl.value = text;
   btnCopy.disabled = false;
   const inLines = raw.split('\n').length;
   const outParas = text.split('\n\n').length;
   statsEl.textContent = inLines + ' linhas → ' + outParas + ' parágrafo(s) | ' + text.length + ' caracteres';
-  if (removidas.length > 0) {
-    filtradasEl.textContent = '⚠ ' + removidas.length + ' linha(s) de ruído removida(s): ' +
-      removidas.slice(0, 3).map(r => '"' + r.substring(0, 50) + (r.length > 50 ? '…' : '') + '"').join(' | ') +
-      (removidas.length > 3 ? ' (e mais ' + (removidas.length - 3) + ')' : '');
-  } else {
-    filtradasEl.textContent = '';
-  }
+  mostrarRemovidas(removidas);
 }
 
 btnClean.addEventListener('click', processar);
@@ -298,11 +379,12 @@ btnClear.addEventListener('click', () => {
   btnCopy.disabled = true;
   statsEl.textContent = '';
   filtradasEl.textContent = '';
+  mostrarOrigem('');
 });
 
 modeEl.addEventListener('change', () => { if (inputEl.value.trim()) processar(); });
 indentEl.addEventListener('change', () => { if (inputEl.value.trim()) processar(); });
-['fFls','fLateral','fRodape','fCabDoc'].forEach(id => {
+IDS_FILTROS.forEach(id => {
   document.getElementById(id).addEventListener('change', () => { if (inputEl.value.trim()) processar(); });
 });
 </script>
